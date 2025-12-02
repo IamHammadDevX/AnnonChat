@@ -1,4 +1,7 @@
 import type { Express, Request } from "express";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
@@ -117,6 +120,40 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // ============= Upload Endpoint =============
+  const uploadsDir = path.resolve(process.cwd(), "uploads");
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  const storageEngine = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, "_");
+      cb(null, `${base}-${Date.now()}${ext}`);
+    },
+  });
+  const upload = multer({
+    storage: storageEngine,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    fileFilter: (_req, file, cb) => {
+      const isImage = file.mimetype.startsWith("image/");
+      const isVideo = file.mimetype.startsWith("video/");
+      if (isImage || isVideo) cb(null, true);
+      else cb(new Error("Only images and videos are allowed"));
+    },
+  });
+
+  app.post('/api/upload', upload.single('file'), async (req, res) => {
+    try {
+      const file = req.file!;
+      const kind: 'image' | 'video' = file.mimetype.startsWith('image/') ? 'image' : 'video';
+      const urlPath = `/uploads/${file.filename}`;
+      res.json({ url: urlPath, kind, name: file.originalname, size: file.size });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Upload failed' });
+    }
+  });
   
   // ============= Admin API Routes =============
   
@@ -395,7 +432,7 @@ export async function registerRoutes(
                 timestamp: Date.now(),
                 type: 'user',
               };
-              
+
               sendToUser(user.partnerId, socketEvents.MESSAGE_RECEIVED, { message });
               
               if (user.roomId) {
@@ -413,6 +450,51 @@ export async function registerRoutes(
               }
             } catch (error) {
               sendToUser(userId, socketEvents.ERROR, { message: 'Invalid message' });
+            }
+            break;
+          }
+
+          case socketEvents.SEND_MEDIA: {
+            if (!user.partnerId) {
+              sendToUser(userId, socketEvents.ERROR, { message: 'Not connected to a partner' });
+              return;
+            }
+
+            const { url, kind, name, size } = data as { url: string; kind: 'image' | 'video'; name?: string; size?: number };
+            if (!url || !kind) {
+              sendToUser(userId, socketEvents.ERROR, { message: 'Invalid media payload' });
+              return;
+            }
+            // enforce max 5MB
+            if (typeof size === 'number' && size > 5 * 1024 * 1024) {
+              sendToUser(userId, socketEvents.ERROR, { message: 'File too large (max 5MB)' });
+              return;
+            }
+
+            const message: ChatMessage = {
+              id: randomUUID(),
+              content: url,
+              senderId: userId,
+              timestamp: Date.now(),
+              type: 'user',
+              mediaUrl: url,
+              mediaKind: kind,
+              fileName: name,
+              fileSize: size,
+            };
+
+            sendToUser(user.partnerId, socketEvents.MESSAGE_RECEIVED, { message });
+
+            if (user.roomId) {
+              await storage.incrementMessageCount(user.roomId);
+              storage.incrementTodayMessages();
+              await storage.logMessage(
+                user.roomId,
+                user.ip,
+                url,
+                false,
+                undefined,
+              );
             }
             break;
           }

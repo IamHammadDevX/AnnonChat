@@ -134,6 +134,10 @@ export interface ChatMessage {
   senderId: string;
   timestamp: number;
   type: 'user' | 'system';
+  mediaUrl?: string;
+  mediaKind?: 'image' | 'video';
+  fileName?: string;
+  fileSize?: number;
 }
 
 // Chat session for tracking active chats (in-memory)
@@ -203,11 +207,13 @@ export const socketEvents = {
   TYPING: 'typing',
   STOP_TYPING: 'stop_typing',
   DISCONNECT_CHAT: 'disconnect_chat',
+  SEND_MEDIA: 'send_media',
   
   // Server -> Client
   QUEUE_JOINED: 'queue_joined',
   PARTNER_FOUND: 'partner_found',
   MESSAGE_RECEIVED: 'message_received',
+  MEDIA_RECEIVED: 'media_received',
   PARTNER_TYPING: 'partner_typing',
   PARTNER_STOPPED_TYPING: 'partner_stopped_typing',
   PARTNER_DISCONNECTED: 'partner_disconnected',

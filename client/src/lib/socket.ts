@@ -112,6 +112,10 @@ class SocketManager {
   disconnectChat() {
     this.send(socketEvents.DISCONNECT_CHAT);
   }
+
+  sendMedia(url: string, kind: 'image' | 'video', name?: string, size?: number) {
+    this.send(socketEvents.SEND_MEDIA, { url, kind, name, size });
+  }
 }
 
 export const socketManager = new SocketManager();

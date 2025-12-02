@@ -25,6 +25,8 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isBanned, setIsBanned] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -168,6 +170,69 @@ export default function Chat() {
       socketManager.sendStopTyping();
       isTypingRef.current = false;
     }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || status !== 'connected') return;
+    setUploadError(null);
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) {
+      setUploadError('Only images and videos are allowed');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('File too large (max 5MB)');
+      return;
+    }
+
+    const form = new FormData();
+    form.append('file', file);
+
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload');
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          setUploadProgress(Math.round((evt.loaded / evt.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        setUploadProgress(null);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const resp = JSON.parse(xhr.responseText);
+            const message: ChatMessage = {
+              id: crypto.randomUUID(),
+              content: resp.url,
+              senderId: 'self',
+              timestamp: Date.now(),
+              type: 'user',
+              mediaUrl: resp.url,
+              mediaKind: resp.kind,
+              fileName: resp.name,
+              fileSize: resp.size,
+            };
+            setMessages(prev => [...prev, message]);
+            socketManager.sendMedia(resp.url, resp.kind, resp.name, resp.size);
+            resolve();
+          } catch (err) {
+            setUploadError('Failed to parse upload response');
+            reject(err);
+          }
+        } else {
+          setUploadError('Upload failed');
+          reject(new Error('Upload failed'));
+        }
+      };
+      xhr.onerror = () => {
+        setUploadProgress(null);
+        setUploadError('Upload error');
+        reject(new Error('Upload error'));
+      };
+      xhr.send(form);
+    });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -346,7 +411,20 @@ export default function Chat() {
 
             {/* Input Area */}
             <div className="shrink-0 p-4 border-t border-border bg-card/50 backdrop-blur-sm">
-              <div className="max-w-3xl mx-auto flex gap-2">
+              <div className="max-w-3xl mx-auto flex gap-2 items-center">
+                <input 
+                  type="file" 
+                  accept="image/*,video/*" 
+                  onChange={handleFileSelect}
+                  disabled={status !== 'connected'}
+                  className="hidden" 
+                  id="file-input"
+                />
+                <label htmlFor="file-input">
+                  <Button variant="outline" size="icon" disabled={status !== 'connected'}>
+                    📎
+                  </Button>
+                </label>
                 <Input
                   ref={inputRef}
                   value={inputValue}
@@ -366,6 +444,17 @@ export default function Chat() {
                   <Send className="w-5 h-5" />
                 </Button>
               </div>
+              {uploadProgress !== null && (
+                <div className="max-w-3xl mx-auto mt-2">
+                  <div className="w-full h-2 bg-muted rounded">
+                    <div className="h-2 bg-primary rounded" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Uploading... {uploadProgress}%</p>
+                </div>
+              )}
+              {uploadError && (
+                <div className="max-w-3xl mx-auto mt-2 text-destructive text-sm">{uploadError}</div>
+              )}
             </div>
           </>
         )}
@@ -402,7 +491,15 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           }`}
           data-testid={`message-${message.id}`}
         >
-          <p className="break-words whitespace-pre-wrap">{message.content}</p>
+          {message.mediaUrl ? (
+            message.mediaKind === 'image' ? (
+              <img src={message.mediaUrl} alt={message.fileName || 'image'} className="max-w-full rounded-md" />
+            ) : (
+              <video src={message.mediaUrl} controls className="max-w-full rounded-md" />
+            )
+          ) : (
+            <p className="break-words whitespace-pre-wrap">{message.content}</p>
+          )}
         </div>
         <p className={`text-xs text-muted-foreground mt-1 ${isSelf ? 'text-right' : 'text-left'}`}>
           {time}
