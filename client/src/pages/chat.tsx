@@ -412,19 +412,25 @@ export default function Chat() {
             {/* Input Area */}
             <div className="shrink-0 p-4 border-t border-border bg-card/50 backdrop-blur-sm">
               <div className="max-w-3xl mx-auto flex gap-2 items-center">
-                <input 
-                  type="file" 
-                  accept="image/*,video/*" 
+                <input
+                  type="file"
+                  accept="image/*,video/*"
                   onChange={handleFileSelect}
-                  disabled={status !== 'connected'}
-                  className="hidden" 
+                  className="hidden"
                   id="file-input"
                 />
-                <label htmlFor="file-input">
-                  <Button variant="outline" size="icon" disabled={status !== 'connected'}>
-                    📎
-                  </Button>
-                </label>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  disabled={status !== 'connected'}
+                  onClick={() => {
+                    if (status === 'connected') {
+                      document.getElementById('file-input')?.click();
+                    }
+                  }}
+                >
+                  📎
+                </Button>
                 <Input
                   ref={inputRef}
                   value={inputValue}
